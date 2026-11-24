@@ -31,12 +31,22 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle assembleDebug
+      - name: Locate project and build APK
+        shell: bash
+        run: |
+          SETTINGS_FILE="$(find . -name settings.gradle -not -path '*/.gradle/*' -print -quit)"
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: No se encontró settings.gradle. Extrae el contenido del ZIP en el repositorio; no subas solamente el ZIP."
+            exit 1
+          fi
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          echo "Proyecto Android encontrado en: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
+          gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ALEJO-MUSIC-DOWNLOADER-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: '**/app/build/outputs/apk/debug/app-debug.apk'
           if-no-files-found: error
