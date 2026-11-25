@@ -1,27 +1,32 @@
+
 name: Build OMNI MATRIX APK
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'OMNI_MATRIX_SOURCE.zip'
+      - 'OMNI_MATRIX_SOURCE_FIXED.zip'
       - '.github/workflows/build-apk.yml'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Check source ZIP
         run: |
-          test -f OMNI_MATRIX_SOURCE.zip || { echo 'No se encontró OMNI_MATRIX_SOURCE.zip en la raíz del repositorio'; exit 1; }
+          test -f OMNI_MATRIX_SOURCE_FIXED.zip || {
+            echo "ERROR: No se encontro OMNI_MATRIX_SOURCE_FIXED.zip"
+            exit 1
+          }
 
       - name: Extract Android project
         run: |
           mkdir -p proyecto
-          unzip -q OMNI_MATRIX_SOURCE.zip -d proyecto
+          unzip -q OMNI_MATRIX_SOURCE_FIXED.zip -d proyecto
           test -f proyecto/settings.gradle
           test -f proyecto/app/build.gradle
 
@@ -35,7 +40,8 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK 35
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
