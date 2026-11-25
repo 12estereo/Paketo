@@ -1,11 +1,11 @@
 
-name: Build OMNI MATRIX APK
+name: Build OMNI MATRIX APK V3
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'OMNI_MATRIX_SOURCE_FIXED_V2.zip'
+      - 'OMNI_MATRIX_SOURCE_FIXED_V3.zip'
       - '.github/workflows/build-apk.yml'
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
 
       - name: Check source ZIP
         run: |
-          test -f OMNI_MATRIX_SOURCE_FIXED_V2.zip || {
+          test -f OMNI_MATRIX_SOURCE_FIXED_V3.zip || {
             echo "ERROR: ZIP no encontrado"
             exit 1
           }
@@ -26,7 +26,7 @@ jobs:
       - name: Extract Android project
         run: |
           mkdir -p proyecto
-          unzip -q OMNI_MATRIX_SOURCE_FIXED_V2.zip -d proyecto
+          unzip -q OMNI_MATRIX_SOURCE_FIXED_V3.zip -d proyecto
           test -f proyecto/settings.gradle
           test -f proyecto/app/build.gradle
 
@@ -55,6 +55,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: OMNI-MATRIX-APK
+          name: OMNI-MATRIX-APK-V3
           path: proyecto/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
