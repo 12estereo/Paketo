@@ -18,10 +18,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
+      - name: Set up Gradle with dependency cache
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+          cache-disabled: false
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -32,7 +33,7 @@ jobs:
       - name: Extract project ZIP if needed
         shell: bash
         run: |
-          if ! find . -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -not -path '*/.gradle/*' -print -quit | grep -q .; then
+          if ! find . -type f \\( -name 'settings.gradle' -o -name 'settings.gradle.kts' \\) -not -path '*/.gradle/*' -print -quit | grep -q .; then
             ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' -print -quit)"
             if [ -z "$ZIP_FILE" ]; then
               echo "No se encontró settings.gradle(.kts) ni un ZIP del proyecto."
@@ -46,7 +47,7 @@ jobs:
         id: project
         shell: bash
         run: |
-          SETTINGS="$(find . -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) -not -path '*/.gradle/*' -print -quit)"
+          SETTINGS="$(find . -type f \\( -name 'settings.gradle.kts' -o -name 'settings.gradle' \\) -not -path '*/.gradle/*' -print -quit)"
           if [ -z "$SETTINGS" ]; then
             echo "No se encontró settings.gradle(.kts)."
             exit 1
@@ -55,8 +56,26 @@ jobs:
           echo "root=$ROOT" >> "$GITHUB_OUTPUT"
           echo "Proyecto: $ROOT"
 
-      - name: Build APK
-        run: gradle --no-daemon -p "${{ steps.project.outputs.root }}" assembleDebug
+      - name: Build APK (retry on temporary repository errors)
+        shell: bash
+        run: |
+          ROOT="${{ steps.project.outputs.root }}"
+          for attempt in 1 2 3 4; do
+            echo "Intento de compilación $attempt de 4"
+            if gradle --no-daemon --max-workers=2 -p "$ROOT" assembleDebug; then
+              echo "Compilación exitosa."
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 4 ]; then
+              WAIT=$((attempt * 30))
+              echo "La compilación falló. Esperando ${WAIT}s antes de reintentar..."
+              sleep "$WAIT"
+            fi
+          done
+
+          echo "La compilación falló después de 4 intentos."
+          exit 1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
