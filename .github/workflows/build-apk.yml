@@ -23,34 +23,75 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Instalar Java 17
+      # 2. Configurar Java 17
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Configurar Gradle y caché
+      # 3. Configurar Gradle
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # 4. Instalar Android SDK
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      # 5. Aceptar licencias e instalar paquetes
-      - name: Accept Android SDK licenses
+      # 4. Localizar Android SDK
+      - name: Configure Android SDK
         shell: bash
         run: |
-          yes | sdkmanager --licenses || true
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
 
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          if [ ! -d "$SDK" ]; then
+            SDK="/opt/android-sdk"
+          fi
 
-      # 6. Extraer ZIP y localizar proyecto
-      - name: Locate and extract Android project
+          if [ ! -d "$SDK" ]; then
+            echo "ERROR: Android SDK no encontrado."
+            exit 1
+          fi
+
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+
+          echo "SDK encontrado en: $SDK"
+
+          SDKMANAGER=$(find "$SDK/cmdline-tools" \
+            -type f -name sdkmanager 2>/dev/null | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager no encontrado."
+            find "$SDK" -maxdepth 4 -type f -name sdkmanager
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_PATH"
+
+          "$SDKMANAGER" --version
+
+      # 5. Aceptar licencias e instalar SDK
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | "$SDKMANAGER" --licenses || true
+
+          for attempt in 1 2 3; do
+            "$SDKMANAGER" \
+              "platform-tools" \
+              "platforms;android-35" \
+              "build-tools;35.0.0" && break
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "ERROR instalando paquetes Android."
+              exit 1
+            fi
+
+            echo "Reintentando instalacion..."
+            sleep $((attempt * 20))
+          done
+
+      # 6. Localizar o extraer proyecto Android
+      - name: Locate Android project
         shell: bash
         run: |
           python3 <<'PY'
@@ -60,44 +101,60 @@ jobs:
 
           root = Path.cwd()
           temp = Path(os.environ["RUNNER_TEMP"])
-          expected = "SLR_PRO_CAMERA_Android_Project_v4.zip"
+          search_root = root
 
-          archives = list(root.rglob(expected))
+          def find_projects(folder):
+              found = []
 
-          if archives:
-              destination = temp / "slr_camera_source"
-              destination.mkdir(parents=True, exist_ok=True)
+              for name in ("settings.gradle", "settings.gradle.kts"):
+                  for settings in folder.rglob(name):
+                      parent = settings.parent
+                      app = parent / "app"
 
-              with zipfile.ZipFile(archives[0]) as z:
-                  z.extractall(destination)
+                      if (
+                          (app / "build.gradle").exists()
+                          or (app / "build.gradle.kts").exists()
+                      ):
+                          found.append(parent)
 
-              search_root = destination
-              print("ZIP extraido correctamente.")
-          else:
-              search_root = root
-              print("Buscando proyecto Android existente.")
+              return found
 
-          settings = []
+          projects = find_projects(root)
 
-          for pattern in ("settings.gradle", "settings.gradle.kts"):
-              settings.extend(search_root.rglob(pattern))
+          if not projects:
+              print("Buscando proyecto dentro de archivos ZIP...")
 
-          projects = []
+              for archive in root.rglob("*.zip"):
+                  try:
+                      with zipfile.ZipFile(archive) as z:
+                          names = z.namelist()
 
-          for item in settings:
-              folder = item.parent
-              app = folder / "app"
+                          valid = any(
+                              n.endswith("/settings.gradle")
+                              or n.endswith("/settings.gradle.kts")
+                              or n in ("settings.gradle", "settings.gradle.kts")
+                              for n in names
+                          )
 
-              if (
-                  (app / "build.gradle").exists()
-                  or (app / "build.gradle.kts").exists()
-              ):
-                  projects.append(folder)
+                          if not valid:
+                              continue
+
+                          destination = temp / "slr_camera_source"
+                          destination.mkdir(parents=True, exist_ok=True)
+
+                          z.extractall(destination)
+
+                          projects = find_projects(destination)
+
+                          if projects:
+                              break
+
+                  except (zipfile.BadZipFile, OSError):
+                      continue
 
           if not projects:
               raise SystemExit(
-                  "ERROR: No se encontro el proyecto Android "
-                  "con modulo app. Comprueba el ZIP."
+                  "ERROR: No se encontro un proyecto Android valido."
               )
 
           project = min(projects, key=lambda p: len(p.parts))
@@ -108,51 +165,70 @@ jobs:
               f.write(f"ANDROID_PROJECT_DIR={project}\n")
           PY
 
-      # 7. Verificar Gradle Wrapper
-      - name: Verify Gradle Wrapper
+      # 7. Verificar proyecto
+      - name: Verify Android project
         shell: bash
         run: |
           cd "$ANDROID_PROJECT_DIR"
 
-          if [ ! -f "./gradlew" ]; then
-            echo "ERROR: El proyecto no contiene gradlew."
+          if [ ! -f "gradlew" ]; then
+            echo "ERROR: Falta el archivo gradlew."
             exit 1
           fi
 
-          chmod +x ./gradlew
-          ./gradlew --version
+          if [ ! -d "app" ]; then
+            echo "ERROR: Falta el modulo app."
+            exit 1
+          fi
 
-      # 8. Compilar APK con reintentos para HTTP 429
+          chmod +x gradlew
+
+          echo "Proyecto Android verificado."
+          ls -la
+
+      # 8. Compilar APK
       - name: Build SLR PRO CAMERA
         shell: bash
         run: |
           cd "$ANDROID_PROJECT_DIR"
 
           for attempt in 1 2 3; do
-            echo "Intento de compilacion $attempt de 3"
+
+            echo "COMPILACION $attempt DE 3"
 
             set +e
+
             ./gradlew \
               --no-daemon \
               --stacktrace \
               --max-workers=2 \
-              :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/build.log"
+              :app:assembleDebug \
+              2>&1 | tee "$RUNNER_TEMP/build.log"
 
             result=${PIPESTATUS[0]}
+
             set -e
 
             if [ "$result" -eq 0 ]; then
-              echo "APK compilado correctamente."
+              echo "COMPILACION EXITOSA."
               exit 0
             fi
 
-            if grep -Eqi "429|Too Many Requests" "$RUNNER_TEMP/build.log" && [ "$attempt" -lt 3 ]; then
-              echo "Servidor Maven ocupado. Esperando antes de reintentar..."
-              sleep $((attempt * 30))
+            if grep -Eqi \
+              "429|Too Many Requests|Connection reset|Read timed out" \
+              "$RUNNER_TEMP/build.log"; then
+
+              if [ "$attempt" -lt 3 ]; then
+                echo "Error temporal de descarga."
+                sleep $((attempt * 30))
+              else
+                exit "$result"
+              fi
             else
-              echo "La compilacion fallo. Revisar errores anteriores."
+              echo "Error de compilacion."
               exit "$result"
             fi
+
           done
 
           exit 1
@@ -164,14 +240,15 @@ jobs:
           APK="$ANDROID_PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERROR: No se encontro el APK."
-            find "$ANDROID_PROJECT_DIR" -type f -name "*.apk"
+            echo "ERROR: APK no encontrado."
+            find "$ANDROID_PROJECT_DIR" -name "*.apk"
             exit 1
           fi
 
+          echo "APK GENERADO CORRECTAMENTE"
           ls -lh "$APK"
 
-      # 10. Publicar APK
+      # 10. Subir APK a GitHub
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
