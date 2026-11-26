@@ -1,3 +1,4 @@
+
 name: Build SLR PRO CAMERA APK
 
 on:
@@ -34,19 +35,27 @@ jobs:
         id: project
         shell: bash
         run: |
-          SETTINGS=$(find . -type f \\
-            \\( -name settings.gradle.kts -o -name settings.gradle \\) \\
-            -not -path '*/.gradle/*' -print -quit)
+          SETTINGS="$(find . -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) -not -path '*/.gradle/*' -print -quit)"
 
           if [ -z "$SETTINGS" ]; then
-            echo "No se encontró settings.gradle(.kts)."
+            ZIP_FILE="$(find . -maxdepth 4 -type f -iname '*.zip' -print -quit)"
+
+            if [ -n "$ZIP_FILE" ]; then
+              mkdir -p extracted
+              unzip -o "$ZIP_FILE" -d extracted
+              SETTINGS="$(find extracted -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) -print -quit)"
+            fi
+          fi
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontró el proyecto Android."
             find . -maxdepth 4 -type f | head -100
             exit 1
           fi
 
-          ROOT=$(dirname "$SETTINGS")
+          ROOT="$(dirname "$SETTINGS")"
           echo "root=$ROOT" >> "$GITHUB_OUTPUT"
-          echo "Proyecto: $ROOT"
+          echo "Proyecto encontrado en: $ROOT"
 
       - name: Build APK
         run: gradle --no-daemon -p "${{ steps.project.outputs.root }}" assembleDebug
@@ -55,5 +64,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SLR-PRO-CAMERA-APK
-          path: "**/build/outputs/apk/debug/app-debug.apk"
+          path: '**/app/build/outputs/apk/debug/app-debug.apk'
           if-no-files-found: error
